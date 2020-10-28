@@ -2,17 +2,17 @@
 library(devtools)
 
 # Download package tarball from CRAN archive
-url <- "https://cran.r-project.org/src/contrib/Archive/zipcode/zipcode_1.0.tar.gz"
-pkgFile <- "zipcode_1.0.tar.gz"
-download.file(url = url, destfile = pkgFile)
-
-# Install package
-install.packages(pkgs=pkgFile, type="source", repos=NULL)
-
-# Delete package tarball
-unlink(pkgFile)
-
-devtools::install_github("czigler/arepa")
+# url <- "https://cran.r-project.org/src/contrib/Archive/zipcode/zipcode_1.0.tar.gz"
+# pkgFile <- "zipcode_1.0.tar.gz"
+# download.file(url = url, destfile = pkgFile)
+# 
+# # Install package
+# install.packages(pkgs=pkgFile, type="source", repos=NULL)
+# 
+# # Delete package tarball
+# unlink(pkgFile)
+# 
+# devtools::install_github("czigler/arepa")
 rm(list=ls())
 library(zipcode)
 library(arepa)
