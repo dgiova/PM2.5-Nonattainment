@@ -1,0 +1,39 @@
+---
+title: "MSE 327 Project"
+author: "Davide Giovanardi"
+date: "11/1/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+setwd("/Users/davidegiovanardi/Desktop/MSE327/PM2.5-Nonattainment/MSE327/")
+load("pmanalysis.RData")
+```
+
+# EDA
+## Outcomes
+### Ambient PM2.5 2010-2012
+
+```{r EDA}
+# Check that it matches Table 1
+cat(mean(na.omit(dat[dat$a == 0, "pmfu"])))
+cat(mean(na.omit(dat[dat$a == 1, "pmfu"])))
+
+clean_df <- function(dat, outcome) {
+  df <- na.omit(dat[,c("a",outcome)])
+  return(data.frame(df))
+}
+
+df <- clean_df(dat, "pmfu")
+
+df$Area <- c("attainment", "non-attainment")[(df$a)+1]
+
+ggplot(df, aes(pmfu, color = Area, fill = Area)) +
+  geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
+  geom_density(alpha = 0.25) +
+  theme_minimal() + 
+  ggtitle("Outcome: Ambient PM2.5 2010-2012")
+
+```
