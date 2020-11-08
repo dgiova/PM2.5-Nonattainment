@@ -12,6 +12,7 @@ set.seed(51)
 library(maps)
 library(PSAgraphics)
 library(data.table)
+library(randomForest)
 
 source('mybalcheck.R')
 source('ReadSimsFunction.R')
@@ -83,7 +84,7 @@ print(paste("Total number of fee-for-service Medicare beneficiaries =", sum(dat$
 print(paste("Total number of managed care Medicare beneficiaries =", sum(dat$Tot_den_for_death_MA_FFS.2012) - sum(dat$Total_den_FFS.2012)))
 ```
 ### Nonattainment Description (Section 2.2)
-```{r,  echo=FALSE}
+```{echo=FALSE}
 print(paste("Number of nonattainment areas =", sum(dat$a==1)))
 print(paste("Number of nattainment areas =", sum(dat$a==0)))
 
@@ -98,7 +99,6 @@ check_attain_fu = merge(dat, checka_2012, by = "FIPS", all.x = TRUE)
 check_attain_fu$a_2012[is.na(check_attain_fu$a_2012)] = 0
 with(check_attain_fu, table(a, a_2012))
 print(paste("Percentage of 2005 nonattainment areas that remained in nonattainment in 2012 =", with(check_attain_fu, round(sum(a_2012==1)/(sum(a==1)),2))))
-
 ```
 
 ### Covariate Description in Attainment and Nonattainment Areas (Table 1)
@@ -168,7 +168,8 @@ print(round(vartab,2))
 ```
 
 
-# Propensity Score Analysis
+
+# Propensity Score Analysis - Updated to include Random Forest!
 ```{r, echo=FALSE}
 ###############################################################
 #####     Estimate the Propensity Score      ##################
@@ -177,17 +178,36 @@ dat$CompletelyRural = as.numeric(dat$CompletelyRural)
 # -- Full model using only summary health outcomes
 fullmodel = glm(a~.  + avgrelhum*avgtemp + pmbase*avgtemp, family=binomial(link="logit"), data = dat[, names(dat) %in% c(covariates, "a") & !(names(dat) %in% c("Monitor", "TotPop", "COPDrate", "CVstrokerate", "HFrate", "HRDrate", "IHDrate", "PVDrate", "RTIrate")), with = FALSE]) #"mortrate", "resprate", "CVDrate" 
 
-
 # - Take out Census covariates redundant with Medicare
 allvars = rownames(summary(fullmodel)$coef)
 inclvars = allvars[!(allvars) %in% c("PctBlack", "PctHisp", "PctFemale")]
 inclvars = inclvars[!inclvars %in% c("(Intercept)")]
 inclformula = as.formula(paste("a ~", paste(inclvars, collapse = "+")))
-psmod = glm(inclformula, family=binomial(link="logit"), data = dat) 
-print("The propensity score model summary:")
-summary(psmod)
 
-dat$ps = round(psmod$fitted.values, 3)
+get_propensity_scores <- function(method="logit") {
+  if (method == "logit") {
+    
+    psmod = glm(inclformula, family=binomial(link="logit"), data = dat) 
+    print("The propensity score model summary:")
+    summary(psmod)
+    return(round(psmod$fitted.values, 3))
+    
+  } else if (method == "RF") {
+    
+    inclvars_rf = inclvars[!inclvars %in% c("avgtemp:pmbase", "avgtemp:avgrelhum")]
+    dat_rf <- dat[, names(dat) %in% c(inclvars_rf, "a"), with = FALSE]
+    dat_rf$avgtemp_avgrelhum <- dat_rf$avgrelhum * dat_rf$avgtemp
+    dat_rf$avgtemp_pmbase <- dat_rf$pmbase * dat_rf$avgtemp
+    
+    fit_rf <- randomForest(x = dat_rf[,!"a"], y = as.factor(dat_rf$a))
+    return(fit_rf$votes[,2])
+    
+  }
+}
+
+# dat$ps = get_propensity_scores()
+dat$ps = get_propensity_scores(method="RF")
+
 mina1 = min(dat$ps[dat$a==1])
 maxa0 = max(dat$ps[dat$a==0])
 dat$outofrange = 0
@@ -312,6 +332,10 @@ print(round(vartab,2))
 write.table(round(vartab,2), file = "vartab_pruned_v_retained.txt", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=FALSE, quote=FALSE)
 
 ```
+
+
+
+
 
 # Results (Section 3)
 ```{r,  echo=FALSE}
