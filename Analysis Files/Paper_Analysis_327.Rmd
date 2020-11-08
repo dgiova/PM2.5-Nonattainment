@@ -1,0 +1,640 @@
+---
+title: "Summary of PM2.5 Nonattainment  Analysis"
+author: "Cory Zigler"
+date: "December 20, 2016"
+output: pdf_document
+---
+
+```{r}
+rm(list=ls())
+set.seed(51)
+# library(HEIfunctions)
+library(maps)
+library(PSAgraphics)
+library(data.table)
+
+source('mybalcheck.R')
+source('ReadSimsFunction.R')
+getrate=function(vec, denom){
+  return(vec*1000/denom)
+}
+
+#########   Read in the data and define baseline and follow up measures    ##########
+#### Read in the Data ######
+# --- 'pmanalysis.RData' is a file created from the data construction files
+# ---  Use this file if you want to see the whole analysis from start to finish
+# ---  But note that the data sets and results produced with this file will be different
+# --- from those reported in the paper (sample size, propensity score estimates, effect estimates, etc.).
+# ---  This is because all of the Medicare data are simulated
+load(file="pmanalysis.RData")
+
+#### Read in the Data ######
+# --- 'pm_withps_nomed.Rda' is a file that is provided that is exactly the same as that
+# --- used for the paper, except with all Medicare variable set to zero.  Use this file if
+# --- you wish to reproduce the basic summaries (not involving Medicare), sample sizes, and Table 1.  This 
+# --- file has the actual propensity sore estimates used in the paper.
+# --- Note that this use of this file wil preclude the entirety of this script from running, because 
+# --- the code after line 166 relies on the Medicare data
+# load(file="pm_withps_nomed.Rda")
+
+
+datorig = dat
+
+dat$pmbase = dat$pmbase2002_2004
+dat$baseorig = dat$baseorig2002_2004
+
+#########   Say which results you will use for the final analysis   #####
+pollutiontransform = "log"
+
+whichresults = "fake_med/"
+whichresults_noprune = "fake_med_noprune/"
+whichresults_pollution = "fake_poll_med/"
+whichresults_pollution_noprune = "fake_poll_med_noprune/"
+
+# Specify C for summarizing average associative and dissociative effects
+Cede= 1.0
+Ceae = -1.0
+
+nburn = 10
+thin = 1 
+
+outcomes = c("total_death_FFS_MA.2012", "COPD.2012", "CV_stroke.2012", "HF.2012", "HRD.2012", "IHD.2012",
+                 "PVD.2012", "RTI.2012")
+outcomes.2004 = c("total_death_FFS_MA.2004", "COPD.2004", "CV_stroke.2004", "HF.2004", "HRD.2004", "IHD.2004",
+                 "PVD.2004", "RTI.2004")
+dat$mortrate = 1000*dat$total_death_FFS_MA.2004/dat$Tot_den_for_death_MA_FFS.2004
+dat$CVDrate = 1000*dat$ALL_CVD.2004/dat$Person_year_FFS.2004
+dat$resprate = 1000*(dat$COPD.2004 + dat$RTI.2004)/dat$Person_year_FFS.2004
+dat$COPDrate = 1000*dat$COPD.2004/dat$Person_year_FFS.2004
+dat$CVstrokerate = 1000*dat$CV_stroke.2004/dat$Person_year_FFS.2004
+dat$HFrate = 1000*dat$HF.2004/dat$Person_year_FFS.2004
+dat$HRDrate = 1000*dat$HRD.2004/dat$Person_year_FFS.2004
+dat$IHDrate = 1000*dat$IHD.2004/dat$Person_year_FFS.2004
+dat$PVDrate = 1000*dat$PVD.2004/dat$Person_year_FFS.2004
+dat$RTIrate = 1000*dat$RTI.2004/dat$Person_year_FFS.2004
+outcomes.2004.rate = c("mortrate", "CVDrate", "resprate", "COPDrate", "CVstrokerate", "HFrate", "HRDrate", "IHDrate", "PVDrate", "RTIrate")
+```
+
+
+### Basic Data Description (Section 2.2)
+```{r,  echo=FALSE}
+print(paste("Total number of locations =", dim(dat)[[1]]))
+print(paste("Total number of fee-for-service Medicare beneficiaries =", sum(dat$Total_den_FFS.2012)))
+print(paste("Total number of managed care Medicare beneficiaries =", sum(dat$Tot_den_for_death_MA_FFS.2012) - sum(dat$Total_den_FFS.2012)))
+```
+### Nonattainment Description (Section 2.2)
+```{r,  echo=FALSE}
+print(paste("Number of nonattainment areas =", sum(dat$a==1)))
+print(paste("Number of nattainment areas =", sum(dat$a==0)))
+
+whichyears = 1999:2012  ## only 3 monitors in 1997, only 4 in 1998
+whichvar = "Arithmetic.Mean" ##"X95th.Percentile" ##Arithmetic.Mean"
+attaindat=read.csv('Data Construction/Other Data Files/EPA Nonattainment Table.csv')
+attaindat$FIPS=paste(formatC(attaindat$fips_state, width=2, flag="0"), formatC(attaindat$fips_cnty, width=3, flag="0"), sep="")
+attaindat = subset(attaindat, pollutant=='PM-2.5 1997')
+attaindat$a_2012 = ifelse(attaindat$pw_2012 %in% c("P", "W"), 1, 0)
+checka_2012 = attaindat[, c("FIPS", "a_2012")]
+check_attain_fu = merge(dat, checka_2012, by = "FIPS", all.x = TRUE)
+check_attain_fu$a_2012[is.na(check_attain_fu$a_2012)] = 0
+with(check_attain_fu, table(a, a_2012))
+print(paste("Percentage of 2005 nonattainment areas that remained in nonattainment in 2012 =", with(check_attain_fu, round(sum(a_2012==1)/(sum(a==1)),2))))
+
+```
+
+### Covariate Description in Attainment and Nonattainment Areas (Table 1)
+```{r, echo=FALSE}
+covariates = c("pmbase", "a_ozone",                                                                    ## AQS variables
+               "TotPop", "logpop", "CompletelyRural", "PctUrban",  "PctBlack", "PctHisp", "PctHighSchool", "MedianHHInc",  ## Census Variables
+               "PctPoor", "PctFemale", "PctOccupied", "PctMovedIn5", "MedianHValue",  
+               "smokerate2000",                                                                        ## Smoking rate
+               "avgdewpt", "avgtemp", "avgrelhum",                                                     ## Weather variables       
+               "Tot_den_for_death_MA_FFS.2004", "mean_age.2004", "Female_rate.2004",                   ## Medicare variables
+               "White_rate.2004", "Black_rate.2004", outcomes.2004.rate)    
+othervars = c("Monitor", "Longitude", "Latitude", "a")
+
+
+
+###### Create "Table 1" datatab ######
+# --- "*" for variables included in the PS model$^*$
+# --- "+" for variables included for adjustment in outcome model $^+$
+# --- updated 20161209
+tabvars = covariates[!(covariates %in% c("TotPop"))]
+varnames = c("Ambient PM2.5 2002-2004 ($\\mu g/m^3$)$^*$$^+$", "\\% Ozone nonattainment 2005$^*$", ### Monitor-Level
+           "log(population)$^*$$^+$", "Completely Rural Area$^*$", "\\% Urban$^*$$^+$", "\\% Black$^+$", "\\% Hispanic$^+$", "\\% HS Grad.$^*$$^+$", "Median HH Inc. (\\$)$^*$",
+           "\\% Poor$^*$$^+$", "\\% Female", "\\% Occupied Housing$^*$$^+$", "5-Year Migration Rate$^*$", "Median House Value (\\$)$^*$", 
+           "Smoking Rate$^*$", "Avg. Dew Point ($^\\circ$F)$^*$", "Avg. Temperature ($^\\circ$F)$^*$", "Avg. Rel. Humidity (\\%)$^*$$^+$",
+           "Total Medicare Benef. 2004$^*$$^+$", "Avg. Medicare Age 2004 (years)$^*$$^+$", "\\% Female Medicare Benef. 2004$^*$$^+$", "\\% White Medicare Benef. 2004$^*$$^+$",
+           "\\% Black Medicare Benef. 2004$^*$$^+$",
+           "Mortality$^*$", "All CVD$^*$", "Respiratory$^*$", "COPD", "CV Stroke", "Heart Failure", "HRD", "Ischemic Heart Disease", "Peripheral Vascular Disease", "Respiratory Tract Infection")  ## $^*$ for in PS, $^+$ for in outcome too
+varnames_plot = c("Ambient PM2.5 2002-2004", "\\% Ozone nonattainment 2005", ### Monitor-Level
+           "log(population)", "Completely Rural Area", "% Urban", "% Black", "% Hispanic", "% HS Grad.", "Median HH Inc.",
+           "% Poor", "% Female", "% Occupied Housing", "5-Year Migration Rate", "Median House Value", 
+           "Smoking Rate", "Avg. Dew Point", "Avg. Temperature", "Avg. Rel. Humidity",
+           "Total Medicare Benef.", "Avg. Medicare Age 2004", "% Female Medicare Benef. 2004", "% White Medicare Benef. 2004",
+           "% Black Medicare Benef. 2004",
+           "Mortality", "All CVD", "Respiratory", "COPD", "CV Stroke", "Heart Failure", "HRD", "Ischemic Heart Disease", "Peripheral Vascular Disease", "Respiratory Tract Infection")
+
+
+healthnames = c("mort",  "copd", "cvstroke", "hf", "hrd", "ihd", "pvd", "rti")    
+names(healthnames) = c("total_death_FFS_MA.2012",
+                       "COPD.2012", "CV_stroke.2012", "HF.2012", "HRD.2012", "IHD.2012",
+                       "PVD.2012", "RTI.2012") 
+denominators = c("Tot_den_for_death_MA_FFS.2012", rep("Person_year_FFS.2012", length(healthnames)-1))
+for (h in 1:length(healthnames))
+  dat[, paste(healthnames[h], "rate", sep = "_"):= 1000*dat[, names(healthnames)[h], with = FALSE]/dat[, denominators[h], with = FALSE]]
+
+outvars = c("pmfu", paste(healthnames, "rate", sep = "_"))
+outnames = c("Ambient PM2.5 2010-2012 ($\\mu g/m^3$)", "Mortality 2012", "COPD 2012", "CV Stroke 2012", "Heart Failure 2012", "HRD 2012", 
+             "Ischemic Heart Disease 2012", "Peripheral Vascular Disease 2012", "Respiratory Tract Infection 2012")
+
+allvars = c(tabvars, outvars)
+allnames = c(varnames, outnames)
+vartab = matrix(NA, nrow=length(allvars), ncol=4)
+dimnames(vartab)[[1]] = allnames
+dimnames(vartab)[[2]] = rep(c("Mean", "SD"), 2)
+
+for (i in 1:length(allvars) ){
+  vartab[i,c(1,3)] = with(dat, tapply(as.matrix(dat[,allvars[i], with = FALSE]), a, mean, na.rm=TRUE))
+  vartab[i,c(2,4)] = with(dat, tapply(as.matrix(dat[,allvars[i], with = FALSE]), a, sd, na.rm=TRUE))
+  #  vartab[i,3] = t.test(dat[, vars[i]]~dat[, "a"])$p.value
+}
+
+## convert decimals to percentages
+whichpercentvars = which(substr(dimnames(vartab)[[1]], 1, 2) == "\\%")
+# whichpercentvars = c(2,4,5,6,7,9,10,11,20,21,22)
+vartab[whichpercentvars,] = 100*vartab[whichpercentvars,]
+print(round(vartab,2))
+# write.table(round(vartab,2), file = "vartab.txt", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=FALSE, quote=FALSE)
+```
+
+
+# Propensity Score Analysis
+```{r, echo=FALSE}
+###############################################################
+#####     Estimate the Propensity Score      ##################
+###############################################################
+dat$CompletelyRural = as.numeric(dat$CompletelyRural)
+# -- Full model using only summary health outcomes
+fullmodel = glm(a~.  + avgrelhum*avgtemp + pmbase*avgtemp, family=binomial(link="logit"), data = dat[, names(dat) %in% c(covariates, "a") & !(names(dat) %in% c("Monitor", "TotPop", "COPDrate", "CVstrokerate", "HFrate", "HRDrate", "IHDrate", "PVDrate", "RTIrate")), with = FALSE]) #"mortrate", "resprate", "CVDrate" 
+
+
+# - Take out Census covariates redundant with Medicare
+allvars = rownames(summary(fullmodel)$coef)
+inclvars = allvars[!(allvars) %in% c("PctBlack", "PctHisp", "PctFemale")]
+inclvars = inclvars[!inclvars %in% c("(Intercept)")]
+inclformula = as.formula(paste("a ~", paste(inclvars, collapse = "+")))
+psmod = glm(inclformula, family=binomial(link="logit"), data = dat) 
+print("The propensity score model summary:")
+summary(psmod)
+
+dat$ps = round(psmod$fitted.values, 3)
+mina1 = min(dat$ps[dat$a==1])
+maxa0 = max(dat$ps[dat$a==0])
+dat$outofrange = 0
+
+print(paste("Minimum estimated propensity score =", min(dat$ps)))
+print(paste("Maximum estimated propensity score =", max(dat$ps)))
+
+print(paste("Minimum propensity score among nonattainment areas =", mina1))
+print(paste("Maximum propensity score among attainment areas =", maxa0))
+
+###### Prune based strictly on range of observed PS  ######
+dat$outofrange[dat$ps>maxa0 & dat$a==1]=1
+dat$outofrange[dat$ps<mina1 & dat$a==0]=1
+
+##### Define PS categories ##################
+cuts = quantile(dat$ps[dat$outofrange==0], seq(.25, .75, .25)) # quartiles
+dat$pscat[dat$outofrange==0] = as.numeric(cut(dat$ps[dat$outofrange==0], breaks=c(0,cuts,1), include.lowest=TRUE))
+dat$pscat = as.factor(dat$pscat)
+
+print(paste("Number of nonattainment areas pruned =", sum(dat$outofrange==1 & dat$a==1)))
+print(paste("Number of attainment areas pruned =", sum(dat$outofrange==1 & dat$a==0)))
+
+
+pstab = with(dat, table(a,pscat))
+pstab = rbind(pstab, with(dat, table(pscat)))
+print(pstab)
+write.table(pstab, file = "pstab.txt", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=FALSE, quote=FALSE)
+
+printvars = tabvars
+covnames = varnames_plot
+length(printvars) == length(covnames)
+
+# pdf("balplot.pdf", height=10, width=10)
+par(mar = c(5,10,2,2))
+bal = mybalcheck(covariates=as.matrix(dat[, printvars, with = FALSE]), treatment=dat$a, propensity=dat$ps, strata=dat$pscat, absolute.es=FALSE, xlim=c(-1,2), outofrange=dat$outofrange, universal.psd=FALSE, plot.strata=FALSE, covnames = covnames)
+# dev.off()
+
+
+#### which variables have big differences after PS adjustment (residual confounding)
+# -- Do this in the pruned sample for the main analysis
+stratabal = abs(bal$effect.sizes[, c("a", "b", "c", "d")])
+
+### output a list of variables to include in the models for residual adjustment 
+#### include if: 1) average bal > 0.25 or any stratum greater than 0.5
+whichresid = matrix(0, nrow = dim(stratabal)[[1]], ncol = dim(stratabal)[[2]])
+dimnames(whichresid) = dimnames(stratabal)
+residtoobig = ( abs(stratabal) > 0.5)
+whichresid[residtoobig] = stratabal[residtoobig]
+checkresid = cbind(whichresid, apply(stratabal, 1, mean))
+includevar = abs(checkresid[, dim(stratabal)[[2]]+1]) > 0.25 | rowMeans(abs(checkresid[, 1:(dim(stratabal)[[2]])]) ) > 0
+
+cbind(checkresid, includevar)
+varnames = dimnames(checkresid)[[1]][includevar]
+vars_with_imbalance = printvars[(covnames %in% varnames) & !(covnames %in% c("Mortality", "All CVD", "Respiratory", "COPD", "CV Stroke", "Heart Failure", "HRD", "Ischemic Heart Disease", "Peripheral Vascular Disease", "Respiratory Tract Infection"))]
+save(vars_with_imbalance, file = "vars_with_imbalance.RData")
+print("Variables with residual imbalance that are included for direct covariate adjustment:")
+print(vars_with_imbalance)
+
+
+
+## Output data set with propensity scores
+save(dat, file = "pm_withps.Rda")
+
+fulldat = dat
+```
+
+## Maps of Monitoring Locations (Figure 1)
+```{r,  echo=FALSE}
+
+## --- Propensity Score Maps ----  ##
+colors = c(rgb(0,0,1,.75), rgb(1,0,0,.5))
+
+## Restrict to Eastern US
+whichstates_abb = c("MO", "AR", "IA", "IL", "IN", "MI", "KY", "TN", "MS", "AL", "GA", "SC", "NC", "VA", "WV", "OH", "PA", "DE","DC", "NY", "MA", "CT", "MD", "NH", "VT", "WI", "LA", "MN", "FL", "ME") 
+whichstates_fips = state.fips[state.fips$abb %in% whichstates_abb, "fips"]
+
+# -- All locations (Figure 1a)
+# pdf("monitormap_all.pdf")
+map("state", region = state.fips[state.fips$abb %in% whichstates_abb, "polyname"])
+with(dat, points(Longitude, Latitude, pch = 16, cex=1, col = colors[a+1]))
+legend("bottomleft", pch=16, cex=1, col=colors, c("Attainment", "Nonattainment"), bty="n")
+# dev.off()
+
+# -- Retained locations (Figure 1b)
+# pdf("monitormap_pruned.pdf")
+map("state", region = state.fips[state.fips$abb %in% whichstates_abb, "polyname"])
+with(subset(dat, outofrange==0), points(Longitude, Latitude, pch = 16, cex=1, col = colors[a+1]))
+legend("bottomleft", pch=16, cex = 1, col=colors, c("Attainment", "Nonattainment"), bty="n")
+# dev.off()
+
+```
+
+## Table Comparing Pruned to Retained (Appendix Table XX)
+```{r,  echo=FALSE}
+varnames = c("Ambient PM2.5 2002-2004 ($\\mu g/m^3$)$^*$$^+$", "\\% Ozone nonattainment 2005$^*$", ### Monitor-Level
+           "log(population)$^*$$^+$", "Completely Rural Area$^*$", "\\% Urban$^*$$^+$", "\\% Black$^+$", "\\% Hispanic$^+$", "\\% HS Grad.$^*$$^+$", "Median HH Inc. (\\$)$^*$",
+           "\\% Poor$^*$$^+$", "\\% Female", "\\% Occupied Housing$^*$$^+$", "5-Year Migration Rate$^*$", "Median House Value (\\$)$^*$", 
+           "Smoking Rate$^*$", "Avg. Dew Point ($^\\circ$F)$^*$", "Avg. Temperature ($^\\circ$F)$^*$", "Avg. Rel. Humidity (\\%)$^*$$^+$",
+           "Total Medicare Benef. 2004$^*$$^+$", "Avg. Medicare Age 2004 (years)$^*$$^+$", "\\% Female Medicare Benef. 2004$^*$$^+$", "\\% White Medicare Benef. 2004$^*$$^+$",
+           "\\% Black Medicare Benef. 2004$^*$$^+$",
+           "Mortality$^*$", "All CVD$^*$", "Respiratory$^*$", "COPD", "CV Stroke", "Heart Failure", "HRD", "Ischemic Heart Disease", "Peripheral Vascular Disease", "Respiratory Tract Infection")  ## $^*$ for in PS, $^+$ for in outcome too
+allvars = c(tabvars, outvars)
+allnames = c(varnames, outnames)
+vartab = matrix(NA, nrow=length(allvars), ncol=8)
+dimnames(vartab)[[1]] = allnames
+dimnames(vartab)[[2]] = rep(c("Mean", "SD"), 4)
+
+for (i in 1:length(allvars) ){
+  # - table columns are Attainment retained, Attainment pruned, Nonattainment retained, Nonattainment pruned
+  vartab[i,c(1,3)] = with(subset(dat, a==0), tapply(as.matrix(dat[a==0,allvars[i], with = FALSE]), outofrange, mean, na.rm=TRUE))
+  vartab[i,c(2,4)] = with(subset(dat, a==0), tapply(as.matrix(dat[a==0,allvars[i], with = FALSE]), outofrange, sd, na.rm=TRUE))
+  vartab[i,c(5,7)] = with(subset(dat, a==1), tapply(as.matrix(dat[a==1,allvars[i], with = FALSE]), outofrange, mean, na.rm=TRUE))
+  vartab[i,c(6,8)] = with(subset(dat, a==1), tapply(as.matrix(dat[a==1,allvars[i], with = FALSE]), outofrange, sd, na.rm=TRUE))
+  #  vartab[i,3] = t.test(dat[, vars[i]]~dat[, "a"])$p.value
+}
+
+## convert decimals to percentages
+whichpercentvars = which(substr(dimnames(vartab)[[1]], 1, 2) == "\\%")
+# whichpercentvars = c(2,4,5,6,7,9,10,11,20,21,22)
+vartab[whichpercentvars,] = 100*vartab[whichpercentvars,]
+print(round(vartab,2))
+write.table(round(vartab,2), file = "vartab_pruned_v_retained.txt", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=FALSE, quote=FALSE)
+
+```
+
+# Results (Section 3)
+```{r,  echo=FALSE}
+print(paste("Total number of locations retained after pruning =", sum(dat$outofrange==0)))
+print(paste("Total number of fee-for-service Medicare beneficiaries in pruned sample = ", sum(dat$Total_den_FFS.2012[dat$outofrange==0])))
+
+print(paste("Total number of managed care Medicare beneficiaries in pruned sample = ", sum(dat$Tot_den_for_death_MA_FFS.2012[dat$outofrange==0]) - sum(dat$Total_den_FFS.2012[dat$outofrange==0])))
+
+with(subset(dat, outofrange==0), table(a))
+print(paste("The number of nonattainment locations in the pruned sample =", with(subset(dat, outofrange==0), sum(a==1))))
+```
+
+
+### Missing Data Description (Appendix C.3)
+```{r,  echo=FALSE}
+print(paste("The number of locations with missing baseline pollution =", sum(is.na(dat$baseorig))))
+print(paste("The number of nonattainment locations with missing baseline pollution = ", sum(is.na(dat$baseorig) & dat$a==1)))
+print(paste("The number of retained locations with missing baseline pollution =", sum(is.na(dat$baseorig) & dat$outofrange==0)))
+print(paste("The number of retained nonattainment locations with missing baseline pollution =", sum(is.na(dat$baseorig) & dat$outofrange==0 & dat$a==1)))
+
+print(paste("The number of locations with missing follow up pollution =", sum(is.na(dat$pmfu))))
+print(paste("The number of nonattainment locations with missing follow up pollution = ", sum(is.na(dat$pmfu) & dat$a==1)))
+print(paste("The number of retained locations with missing follow up pollution =", sum(is.na(dat$pmfu) & dat$outofrange==0)))
+print(paste("The number of retained nonattainment locations with missing follow up pollution =", sum(is.na(dat$pmfu) & dat$outofrange==0 & dat$a==1)))
+```
+
+## Pollution Analysis Results
+```{r, echo=FALSE}
+dat = subset(fulldat, outofrange==0)
+
+resultname = paste(whichresults_pollution, "pollutionmodel.RData", sep = "")
+load(resultname)
+
+nsamp = dim(mod$samples)[[1]] - 1 ## "-1" used because last entry is NA
+
+y0out = exp(mod$y0[seq(nburn,nsamp,thin),])
+y1out = exp(mod$y1[seq(nburn,nsamp,thin),])
+
+ceymat = y1out-y0out
+atty = rowMeans(ceymat[, dat$a==1])
+
+print(paste("The posterior mean effect on ambient PM2.5 = ", round(mean(atty), 3)))
+print(paste("with 95% posterior interval = (", round(quantile(atty, c(.025)), 3), ",", round(quantile(atty, c(.975)),3), ")"))
+print(paste("The posterior probability that ATTy < 0 = ", round(sum(atty<0)/length(atty),3)))
+```
+
+
+## Analysis of Health Outcomes
+```{r, echo=FALSE}
+healthnames = c("mort", "copd", "cvstroke", "hf", "hrd", "ihd", "pvd", "rti")    
+names(healthnames) = c("total_death_FFS_MA.2012",
+                       "COPD.2012", "CV_stroke.2012", "HF.2012", "HRD.2012", "IHD.2012",
+                       "PVD.2012", "RTI.2012") 
+fullhealthnames = c("Mortality", "COPD", "CV Stroke", "Heart Fail.", "Heart Rhythm Disord.", "IHD", "PVD", "Resp. Tract Infect.")
+denominators = c("Tot_den_for_death_MA_FFS.2012", rep("Person_year_FFS.2012", length(healthnames)-1))
+healthoutcomes = length(healthnames)
+
+attharray = array(NA, c(healthoutcomes, 5))
+dimnames(attharray) = list(healthnames, c("Mean", "SD", "2.5%", "97.5%", "P(<0)"))
+
+edearray = attharray
+eaearray = attharray
+nedearray = attharray
+neaearray = attharray
+simslist = list()
+nsamp = rep(NA, healthoutcomes)
+
+n = dim(dat)[[1]]
+
+for (hlth in 1:length(healthnames)){
+sims = getsims("log", healthoutname = names(healthnames[hlth]), healthout = healthnames[hlth], denomname = denominators[hlth], 
+               1.0, -1.0, resultsname = paste(whichresults, "pstratamod_", healthnames[hlth], ".Rda", sep=""), temp = FALSE)
+
+simslist[[hlth]] = sims
+nsamp[hlth] = sims[["nsamp"]]
+
+atth = sims[["atth"]][1:(sims$nsamp-nburn)]
+ede  = sims[["ede"]][1:(sims$nsamp-nburn)]
+nede = sims[["nede"]][1:(sims$nsamp-nburn)]
+eae  = sims[["eae"]][1:(sims$nsamp-nburn)]
+neae = sims[["neae"]][1:(sims$nsamp-nburn)]
+
+attharray[hlth,"Mean"] = mean(atth)
+attharray[hlth,"SD"] = sd(atth)
+attharray[hlth,c("2.5%", "97.5%")] = quantile(atth, c(.025, .975))
+attharray[hlth,"P(<0)"] = sum(atth<0)/length(atth)
+    
+edearray[hlth,"Mean"] = mean(ede, na.rm=TRUE)
+edearray[hlth,"SD"] = sd(ede, na.rm=TRUE)
+edearray[hlth,c("2.5%", "97.5%")] = quantile(ede, c(.025, .975), na.rm=TRUE)
+edearray[hlth,"P(<0)"] = sum(ede<0, na.rm=TRUE)/length(ede)
+nedearray[hlth, "Mean"] = mean(nede)
+nedearray[hlth, "SD"] = sd(nede)
+nedearray[hlth, "P(<0)"] = sum(nede==0)
+    
+eaearray[hlth,"Mean"] = mean(eae, na.rm=TRUE)
+eaearray[hlth,"SD"] = sd(eae, na.rm=TRUE)
+eaearray[hlth,c("2.5%", "97.5%")] = quantile(eae, c(.025, .975), na.rm=TRUE)
+eaearray[hlth,"P(<0)"] = sum(eae<0, na.rm=TRUE)/length(eae)
+neaearray[hlth, "Mean"] = mean(neae)
+neaearray[hlth, "SD"] = sd(neae)
+neaearray[hlth, "P(<0)"] = sum(neae==0)
+      
+}#hlth
+
+print("Table summarizing average effects on health outcomes:")
+print(round(attharray,3))
+write.table(round(attharray,3), file = "atth_tab", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+
+print("Table summarizing average dissociative effects:")
+print(round(edearray,3))
+write.table(round(edearray,3), file = "ede_tab", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+print("Table summarizing number of locations used to estimate dissociative effects:")
+print(round(nedearray,3))
+
+
+print("Table summarizing average associative effects:")
+print(round(eaearray,3))
+write.table(round(eaearray,3), file = "eae_tab", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+print("Table summarizing number of locations used to estimate associative effects:")
+print(round(neaearray,3))
+
+####### Line Plots of 95% Posterior Intervals #############
+## ----  Pick which outcomes to display
+displayoutcomes = healthnames
+displaynames = fullhealthnames
+
+# pdf("20161031_med.pdf", width = 12)
+par(mfrow = c(1,1))
+att_x = seq(1, by=4, length = length(displayoutcomes))
+ede_x = seq(2, by=4, length = length(displayoutcomes))
+eae_x = seq(3, by=4, length = length(displayoutcomes))
+
+xlims = c(min(att_x), max(eae_x))
+ylims = c(-6, 6) 
+
+plot(xlims, ylims, axes=FALSE, ylab="Causal Effect", xlab="", type = "n")
+lines(c(-1000,1000), c(0,0), lty = 2)
+
+points(att_x, attharray[displayoutcomes, "Mean"], pch = 16, col = 1)
+arrows(att_x, attharray[displayoutcomes, "2.5%"], att_x, attharray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 1)
+
+points(ede_x, edearray[displayoutcomes, "Mean"], pch = 16, col = 2)
+arrows(ede_x, edearray[displayoutcomes, "2.5%"], ede_x, edearray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 2)
+
+points(eae_x, eaearray[displayoutcomes, "Mean"], pch = 16, col = 3)
+arrows(eae_x, eaearray[displayoutcomes, "2.5%"], eae_x, eaearray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 3)
+
+axis(side = 2, at = seq(min(ylims), max(ylims), by = 1), labels = round(seq(min(ylims), max(ylims), by = 1), 1))
+
+mtext(displaynames, side = 1, at = ede_x)
+
+legend("topright", c("Overall Average Effect", "Average Dissociative Effect", "Average Associative Effect"), bty = "n", lty = c(1,1,1), pch = c(16,16,16), col = c(1,2,3))
+# dev.off()
+```
+
+
+
+# Sensitivity analysis without pruning
+```{r, echo=FALSE}
+dat_sens = fulldat
+dat_sens$outofrange=0
+
+## Quantiles
+cuts = c(0.25, 0.5, 0.75)
+dat_sens$pscat[dat_sens$outofrange==0] = as.numeric(cut(dat_sens$ps[dat_sens$outofrange==0], breaks=c(0,cuts,1), include.lowest=TRUE))
+
+print("Table showing number of attainment, nonattainment locations in each propensity score group:")
+print(with(dat_sens, table(a,pscat)))
+
+# pdf("balplot_noprune.pdf", height=10, width=10)
+bal = mybalcheck(covariates=as.matrix(dat_sens[, printvars, with = FALSE]), treatment=dat_sens$a, propensity=dat_sens$ps, strata=dat_sens$pscat, absolute.es=FALSE, xlim=c(-1,2), outofrange=dat_sens$outofrange, universal.psd=FALSE, plot.strata=FALSE, covnames = covnames)
+# dev.off()
+
+stratabal = abs(bal$effect.sizes[, c("a", "b", "c", "d")])
+
+### output a list of variables to include in the models for residual adjustment 
+#### include if: 1) average bal > 0.25 or any stratum greater than 0.5
+whichresid = matrix(0, nrow = dim(stratabal)[[1]], ncol = dim(stratabal)[[2]])
+dimnames(whichresid) = dimnames(stratabal)
+residtoobig = ( abs(stratabal) > 0.5)
+whichresid[residtoobig] = stratabal[residtoobig]
+checkresid = cbind(whichresid, apply(stratabal, 1, mean))
+includevar = abs(checkresid[, dim(stratabal)[[2]]+1]) > 0.25 | rowMeans(abs(checkresid[, 1:(dim(stratabal)[[2]])]) ) > 0
+cbind(checkresid, includevar)
+varnames = dimnames(checkresid)[[1]][includevar]
+vars_with_imbalance_noprune = printvars[(covnames %in% varnames) & !(covnames %in% c("Mortality", "All CVD", "Respiratory", "COPD", "CV Stroke", "Heart Failure", "HRD", "Ischemic Heart Disease", "Peripheral Vascular Disease", "Respiratory Tract Infection"))]
+save(vars_with_imbalance_noprune, file = "vars_with_imbalance_noprune.RData")
+print("Variables with residual imbalance that are included for direct covariate adjustment:")
+print(vars_with_imbalance_noprune)
+
+```
+
+## Sensitivity Analysis: Pollution Outcomes
+```{r, echo=FALSE}
+dat = dat_sens
+
+resultname = paste(whichresults_pollution_noprune, "pollutionmodel.RData", sep = "")
+load(resultname)
+
+nsamp = dim(mod$samples)[[1]] 
+print(paste("The number of MCMC iterations (after burn in) for the sensitivity analysis of pollution outcomes =", (nsamp - nburn)))
+y0out = exp(mod$y0[seq(nburn,nsamp,thin),])
+y1out = exp(mod$y1[seq(nburn,nsamp,thin),])
+
+ceymat = y1out-y0out
+atty = rowMeans(ceymat[, dat$a==1])
+
+print(paste("The posterior mean effect on ambient PM2.5 = ", round(mean(atty), 3)))
+print(paste("and 95% posterior interval = (", round(quantile(atty, c(.025)), 3), ",", round(quantile(atty, c(.975)),3), ")"))
+print(paste("The posterior probability that ATTy < 0 = ", round(sum(atty<0)/length(atty),3)))
+```
+
+## Sensitivity Analysis: Health Outcomes
+```{r, echo=FALSE}
+healthnames = c("mort", "copd", "cvstroke", "hf", "hrd", "ihd", "pvd", "rti")    
+names(healthnames) = c("total_death_FFS_MA.2012",
+                       "COPD.2012", "CV_stroke.2012", "HF.2012", "HRD.2012", "IHD.2012",
+                       "PVD.2012", "RTI.2012") 
+fullhealthnames = c("Mortality", "COPD", "CV Stroke", "Heart Fail.", "Heart Rhythm Disord.", "IHD", "PVD", "Resp. Tract Infect.")
+denominators = c("Tot_den_for_death_MA_FFS.2012", rep("Person_year_FFS.2012", length(healthnames)-1))
+healthoutcomes = length(healthnames)
+
+attharray = array(NA, c(healthoutcomes, 5))
+dimnames(attharray) = list(healthnames, c("Mean", "SD", "2.5%", "97.5%", "P(<0)"))
+
+edearray = attharray
+eaearray = attharray
+nedearray = attharray
+neaearray = attharray
+simslist = list()
+nsamp = rep(NA, healthoutcomes)
+
+n = dim(dat)[[1]]
+
+for (hlth in 1:length(healthnames)){
+sims = getsims("log", healthoutname = names(healthnames[hlth]), healthout = healthnames[hlth], denomname = denominators[hlth], 
+               1.0, -1.0, resultsname = paste(whichresults_noprune, "pstratamod_", healthnames[hlth], ".Rda", sep=""), temp = FALSE)
+
+simslist[[hlth]] = sims
+nsamp[hlth] = sims[["nsamp"]]
+
+atth = sims[["atth"]][1:(sims$nsamp-nburn)]
+ede  = sims[["ede"]][1:(sims$nsamp-nburn)]
+nede = sims[["nede"]][1:(sims$nsamp-nburn)]
+eae  = sims[["eae"]][1:(sims$nsamp-nburn)]
+neae = sims[["neae"]][1:(sims$nsamp-nburn)]
+
+attharray[hlth,"Mean"] = mean(atth)
+attharray[hlth,"SD"] = sd(atth)
+attharray[hlth,c("2.5%", "97.5%")] = quantile(atth, c(.025, .975))
+attharray[hlth,"P(<0)"] = sum(atth<0)/length(atth)
+    
+edearray[hlth,"Mean"] = mean(ede, na.rm=TRUE)
+edearray[hlth,"SD"] = sd(ede, na.rm=TRUE)
+edearray[hlth,c("2.5%", "97.5%")] = quantile(ede, c(.025, .975), na.rm=TRUE)
+edearray[hlth,"P(<0)"] = sum(ede<0, na.rm=TRUE)/length(ede)
+nedearray[hlth, "Mean"] = mean(nede)
+nedearray[hlth, "SD"] = sd(nede)
+nedearray[hlth, "P(<0)"] = sum(nede==0)
+    
+eaearray[hlth,"Mean"] = mean(eae, na.rm=TRUE)
+eaearray[hlth,"SD"] = sd(eae, na.rm=TRUE)
+eaearray[hlth,c("2.5%", "97.5%")] = quantile(eae, c(.025, .975), na.rm=TRUE)
+eaearray[hlth,"P(<0)"] = sum(eae<0, na.rm=TRUE)/length(eae)
+neaearray[hlth, "Mean"] = mean(neae)
+neaearray[hlth, "SD"] = sd(neae)
+neaearray[hlth, "P(<0)"] = sum(neae==0)
+      
+}#hlth
+
+print(paste("The number of MCMC iterations (after burn in) for the sensitivity analysis of", healthnames, "was", (nsamp -nburn )))
+
+
+print("Table summarizing average effects on health outcomes:")
+print(round(attharray,3))
+write.table(round(attharray,3), file = "atth_tab_noprune", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+
+print("Table summarizing average dissociative effects:")
+print(round(edearray,3))
+write.table(round(edearray,3), file = "ede_tab_noprune", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+
+print("Table summarizing average associative effects:")
+print(round(eaearray,3))
+write.table(round(eaearray,3), file = "eae_tab_noprune", sep="&", eol="\\\\ \n", row.names=TRUE, col.names=TRUE, quote=FALSE)
+
+####### Line Plots of 95% Posterior Intervals #############
+## ----  Pick which outcomes to display
+displayoutcomes = healthnames
+displaynames = fullhealthnames
+
+# pdf("20161031_med_noprune.pdf", width = 12)
+par(mfrow = c(1,1))
+att_x = seq(1, by=4, length = length(displayoutcomes))
+ede_x = seq(2, by=4, length = length(displayoutcomes))
+eae_x = seq(3, by=4, length = length(displayoutcomes))
+
+xlims = c(min(att_x), max(eae_x))
+ylims = c(-6, 6) 
+
+plot(xlims, ylims, axes=FALSE, ylab="Causal Effect", xlab="", type = "n")
+lines(c(-1000,1000), c(0,0), lty = 2)
+
+points(att_x, attharray[displayoutcomes, "Mean"], pch = 16, col = 1)
+arrows(att_x, attharray[displayoutcomes, "2.5%"], att_x, attharray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 1)
+
+points(ede_x, edearray[displayoutcomes, "Mean"], pch = 16, col = 2)
+arrows(ede_x, edearray[displayoutcomes, "2.5%"], ede_x, edearray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 2)
+
+points(eae_x, eaearray[displayoutcomes, "Mean"], pch = 16, col = 3)
+arrows(eae_x, eaearray[displayoutcomes, "2.5%"], eae_x, eaearray[displayoutcomes, "97.5%"], lwd=2, length=0, col= 3)
+
+axis(side = 2, at = seq(min(ylims), max(ylims), by = 1), labels = round(seq(min(ylims), max(ylims), by = 1), 1))
+
+mtext(displaynames, side = 1, at = ede_x)
+# dev.off()
+
+```
+
+
+
+
+
+
+
+

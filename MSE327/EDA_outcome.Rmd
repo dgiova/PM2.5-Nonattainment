@@ -21,6 +21,8 @@ load("pmanalysis.RData")
 cat(mean(na.omit(dat[dat$a == 0, "pmfu"])))
 cat(mean(na.omit(dat[dat$a == 1, "pmfu"])))
 
+cat(mean(na.omit(dat[dat$a == 0, "HF.2012"])))
+
 clean_df <- function(dat, outcome) {
   df <- na.omit(dat[,c("a",outcome)])
   return(data.frame(df))
