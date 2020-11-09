@@ -84,7 +84,7 @@ print(paste("Total number of fee-for-service Medicare beneficiaries =", sum(dat$
 print(paste("Total number of managed care Medicare beneficiaries =", sum(dat$Tot_den_for_death_MA_FFS.2012) - sum(dat$Total_den_FFS.2012)))
 ```
 ### Nonattainment Description (Section 2.2)
-```{echo=FALSE}
+```{r, echo=FALSE}
 print(paste("Number of nonattainment areas =", sum(dat$a==1)))
 print(paste("Number of nattainment areas =", sum(dat$a==0)))
 
