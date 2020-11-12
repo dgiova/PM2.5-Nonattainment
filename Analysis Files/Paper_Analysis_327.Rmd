@@ -495,7 +495,64 @@ legend("topright", c("Overall Average Effect", "Average Dissociative Effect", "A
 # dev.off()
 ```
 
+# NEW 1:k matching 
+## 1:1 matching
+NOTE: change propensity score method back to logistic before running this code for 1:1 matching
+```{r}
+# load required packages
+library(DOS2); library(optmatch); library(RItools); library(plyr); library(rcbalance)
+library(dplyr); library(tidyverse); library(gridExtra); library(sensitivitymult)
+library(StatMatch)
+source("utility.R") #helper functions for matching
 
+# for ATTAINMENT (a=0) vs NON-ATTAINMENT (a=1)
+## compute Mahalanobis distance matrix between treated and control for prop score
+# rank-based Mahalanobis distance
+mat.1 <- match_on(a ~ ps, data = dat)
+mat.1 <- addcaliper(mat.1, z=dat$a, p=dat$ps, caliper=0.1)
+# match on propensity score
+ms.1 <- pairmatch(mat.1, data=dat) # matching method
+
+# adat.1 <- summarize.match(dat, ms.1) 
+
+# plot(xBalance(a ~ PctMovedIn5 + MedianHValue + a_ozone + smokerate2000 + mean_age.2004 + Female_rate.2004 + White_rate.2004 + Black_rate.2004 + Tot_den_for_death_MA_FFS.2004 + avgdewpt + avgtemp + avgrelhum + logpop + CompletelyRural + pmbase + mortrate + CVDrate + resprate + avgtemp:avgrelhum + avgtemp:pmbase + strata(ms.1) -1, data=dat))
+
+plot(xBalance(a ~ PctMovedIn5 + MedianHValue + a_ozone + smokerate2000 + mean_age.2004 + Female_rate.2004 + White_rate.2004 + Black_rate.2004 + Tot_den_for_death_MA_FFS.2004 + logpop + CompletelyRural + pmbase + mortrate + CVDrate + resprate + strata(ms.1) -1, data=dat))
+
+# par(mar = c(5,10,2,2))
+# bal.1 = mybalcheck(covariates=as.matrix(dat[, printvars, with = FALSE]), treatment=dat$a, propensity=dat$ps, strata=dat$pscat, absolute.es=FALSE, xlim=c(-1,2), outofrange=dat$outofrange, universal.psd=FALSE, plot.strata=FALSE, covnames = covnames)
+```
+
+```{r}
+# summarize match function, modified for this data
+ps.name="ps"
+adat <- dat
+adat$pair <- ms.1
+adat <- adat[!is.na(adat$pair),]
+adat.treat <- adat[adat$a==1, ]
+adat.ctrl <- adat[adat$a==0, ]
+
+adat.m <- as.data.frame(merge(adat.treat, adat.ctrl, by="pair", suffixes=c(".1", ".0")))
+adat.m <- adat.m[, -which(names(adat.m) %in% c("a.1", "a.0", "pair"))]
+adat.m <- adat.m[, sort(names(adat.m), index.return=TRUE)$ix]
+
+p0.name <- paste0(ps.name,".", 0)
+p1.name <- paste0(ps.name,".",1)
+
+adat.m.tmp.1 <- adat.m[, -which(names(adat.m) %in% c(p0.name, p1.name))]
+adat.m.tmp.2 <- adat.m[, c(p0.name, p1.name)]
+
+adat.m <- cbind(adat.m.tmp.1, adat.m.tmp.2)
+adat.1 <- adat.m
+
+
+print(paste("Avg abs diff in propensity scores w/in matched pairs:",
+            mean(abs(adat.1$ps.0-adat.1$ps.1))))
+
+
+print(paste("Max abs diff in propensity scores w/in matched pairs:",
+            max(abs(adat.1$ps.0-adat.1$ps.1))))
+```
 
 # Sensitivity analysis without pruning
 ```{r, echo=FALSE}
