@@ -387,6 +387,61 @@ print(paste("with 95% posterior interval = (", round(quantile(atty, c(.025)), 3)
 print(paste("The posterior probability that ATTy < 0 = ", round(sum(atty<0)/length(atty),3)))
 ```
 
+# NEW: Stratified DIM estimate (SASKIA) without adjusting for covariates
+```{r}
+### Medium Models
+# load('vars_with_imbalance.RData')
+# vars_with_imbalance
+# toadjust = vars_with_imbalance[!(vars_with_imbalance %in% c("pmbase", "Tot_den_for_death_MA_FFS.2012"))]
+# medformula = as.formula(paste("y ~", paste(c("pscat", "pmbase2002_2004", toadjust), collapse = "+")))
+# my = glm(medformula, data = dat)
+# formula = my$formula
+strata <- unique(dat$pscat[dat$outofrange == 0])
+dat_prune <- dat[dat$outofrange == 0]
+# stratified DIM estimate
+stratum_tau <- numeric(length(strata))
+stratum_weight <- numeric(length(strata))
+stratum_var <- numeric(length(strata))
+stratum_treat_count <- numeric(length(strata))
+stratum_cont_count <- numeric(length(strata))
+# Compute within-stratum DIM (tau) and variance estimates
+for (i in 1:length(strata)){
+  ## Tau (average causal effect of treated vs. control) ##
+  # j <- adynarski$prop >= strata[i] & adynarski$prop <= strata[i+1]
+  j <- (dat_prune$pscat == strata[i])
+  treated <- dat_prune$a == 1
+  control <- dat_prune$a == 0
+  strat_treat <- dat_prune$pmfu[j & treated]
+  strat_treat <- strat_treat[!is.na(strat_treat)]
+  strat_control <- dat$pmfu[j & control]
+  strat_control <- strat_control[!is.na(strat_control)]
+  y_1 <- sum(strat_treat, na.rm = TRUE) # effect among treated units in strata
+  N_1 <- length(strat_treat) # number of treated units in strata
+  y_0 <- sum(strat_control, na.rm = TRUE) # effect among control units in strata
+  N_0 <- length(strat_control) # number of control units in strata 
+  stratum_tau[i] <- (1/N_1)*y_1 - (1/N_0)*y_0
+  stratum_weight[i] <- (N_1+N_0)/nrow(dat_prune)
+  stratum_treat_count[i] <- N_1
+  stratum_cont_count[i] <- N_0
+  ## Variance (Conservative Estimator)
+  v_1 <- sum((strat_treat- ((1/N_1)*y_1))^2)/(N_1-1) 
+  v_0 <- sum((strat_control- ((1/N_0)*y_0))^2)/(N_0-1) 
+  stratum_var[i] <- v_1/N_1 + v_0/N_0
+}
+
+# weight within stratum DIm and variance estimates to get overall estimate
+stratified_dim <- sum(stratum_tau * stratum_weight)
+print(paste("Stratified DIM estimate of ATE =", round(stratified_dim, 5)))
+stratified_var <- sum(stratum_var * stratum_weight^2)
+print(paste("Estimate of variance =", round(stratified_var, 5)))
+
+## 95% CI based on Normal Approximation##
+ci_lower <- stratified_dim + qnorm(.05/2)*sqrt(stratified_var)
+ci_upper <- stratified_dim + qnorm(1-(.05/2))*sqrt(stratified_var)
+print(paste("95% CI interval: (", round(ci_lower, 5), ",", round(ci_upper, 5), ")"))
+stratum_treat_count
+stratum_cont_count
+```
 
 ## Analysis of Health Outcomes
 ```{r, echo=FALSE}
