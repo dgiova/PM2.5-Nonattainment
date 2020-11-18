@@ -32,10 +32,70 @@ df <- clean_df(dat, "pmfu")
 
 df$Area <- c("attainment", "non-attainment")[(df$a)+1]
 
-ggplot(df, aes(pmfu, color = Area, fill = Area)) +
+plot1 <- ggplot(df, aes(pmfu, color = Area, fill = Area)) +
   geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
   geom_density(alpha = 0.25) +
   theme_minimal() + 
-  ggtitle("Outcome: Ambient PM2.5 2010-2012")
-
+  ggtitle("Outcome: Ambient PM2.5 2010-2012") +
+  xlab("Ambient PM2.5 2010/12")
 ```
+
+```{r}
+# Check that it matches Table 1
+cat(mean(na.omit(dat[dat$a == 0, "pmbase2002_2004"])))
+cat(mean(na.omit(dat[dat$a == 1, "pmbase2002_2004"])))
+
+cat(mean(na.omit(dat[dat$a == 0, "HF.2012"])))
+
+clean_df <- function(dat, outcome) {
+  df <- na.omit(dat[,c("a",outcome)])
+  return(data.frame(df))
+}
+
+df_1 <- clean_df(dat, "pmbase2002_2004")
+
+df_1$Area <- c("attainment", "non-attainment")[(df_1$a)+1]
+
+plot2 <- ggplot(df_1, aes(pmbase2002_2004, color = Area, fill = Area)) +
+  geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
+  geom_density(alpha = 0.25) +
+  theme_minimal() + 
+  ggtitle("Outcome: Ambient PM2.5 2002-2004") + 
+  xlab("Ambient PM2.5 2002/04")
+```
+
+
+
+```{r}
+# Check that it matches Table 1
+
+clean_df_1 <- function(dat, outcome1, outcome2) {
+  df <- na.omit(dat[,c("a",outcome1, outcome2)])
+  return(data.frame(df))
+}
+
+df_2 <- clean_df_1(dat, "pmfu", "pmbase2002_2004")
+
+df_2$Area <- c("attainment", "non-attainment")[(df_2$a)+1]
+df_2$dif <- df_2$pmbase2002_2004 - df_2$pmfu
+
+plot3 <- ggplot(df_2, aes(dif, color = Area, fill = Area)) +
+  geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
+  geom_density(alpha = 0.25) +
+  theme_minimal() + 
+  ggtitle("Outcome: Change in Ambient PM2.5 between 2002/04 and 2010/12") + 
+  xlab("Ambient [PM2.5] 2002/04 - Ambient [PM2.5] 2010/12")
+```
+
+```{r}
+par(mfrow = c(2, 2))
+plot1
+plot2
+plot3
+```
+
+
+
+
+
+
