@@ -36,6 +36,7 @@ plot1 <- ggplot(df, aes(pmfu, color = Area, fill = Area)) +
   geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
   geom_density(alpha = 0.25) +
   theme_minimal() + 
+  theme(legend.position = "none") +
   ggtitle("Outcome: Ambient PM2.5 2010-2012") +
   xlab("Ambient PM2.5 2010/12")
 ```
@@ -60,6 +61,7 @@ plot2 <- ggplot(df_1, aes(pmbase2002_2004, color = Area, fill = Area)) +
   geom_histogram(aes(y=..density..), position="identity", alpha=0.5, bins = 25) +
   geom_density(alpha = 0.25) +
   theme_minimal() + 
+  theme(legend.position = "none") +
   ggtitle("Outcome: Ambient PM2.5 2002-2004") + 
   xlab("Ambient PM2.5 2002/04")
 ```
@@ -88,10 +90,19 @@ plot3 <- ggplot(df_2, aes(dif, color = Area, fill = Area)) +
 ```
 
 ```{r}
-par(mfrow = c(2, 2))
-plot1
-plot2
-plot3
+library("gridExtra")
+lay <- rbind(c(1,2),
+             c(3,3))
+all_plots <- grid.arrange(plot2, plot1, plot3, layout_matrix = lay)
+#grid.arrange(plot1, plot2, plot3, ncol = 2, nrow = 2)
+
+ggsave(
+  "hist_figure1.png",
+  plot = all_plots,
+  width = 7.5,
+  height = 4,
+  dpi = 1200
+)
 ```
 
 
